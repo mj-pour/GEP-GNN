@@ -1,0 +1,12 @@
+# Ignore virtual environment
+venv/
+
+# Ignore virtual documents
+.virtual_documents/
+
+# Ignore Jupyter notebook checkpoints
+src/.ipynb_checkpoints/
+
+# Other common ignores
+__pycache__/
+.DS_Store
