@@ -15,9 +15,10 @@ and keep batch handling are included.
 """
 
 import torch
+import numpy as np
 import torch.nn.functional as F
 from torch import nn
-from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import GCNConv, GINConv, global_mean_pool
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import add_self_loops, softmax
 
@@ -163,6 +164,255 @@ class EdgeAttrGATModel(nn.Module):
         return out
 
 
+class GINModel(nn.Module):
+    def __init__(self, in_channels, hidden_channels=64, num_layers=3, num_classes=2, dropout=0.3):
+        super(GINModel, self).__init__()
+        self.num_layers = num_layers
+        self.dropout = dropout
+
+        layers = []
+        input_dim = in_channels
+        for i in range(num_layers):
+            mlp = nn.Sequential(
+                nn.Linear(input_dim, hidden_channels),
+                nn.ReLU(),
+                nn.Linear(hidden_channels, hidden_channels),
+            )
+            layers.append(GINConv(mlp))
+            input_dim = hidden_channels
+        self.convs = nn.ModuleList(layers)
+
+        self.lin1 = nn.Linear(hidden_channels, hidden_channels)
+        self.lin2 = nn.Linear(hidden_channels, num_classes)
+
+    def forward(self, data):
+        x, edge_index, batch = data.x, data.edge_index, data.batch
+        for conv in self.convs:
+            x = conv(x, edge_index)
+            x = torch.relu(x)
+            x = torch.dropout(x, p=self.dropout, train=self.training)
+
+        # Pool node embeddings
+        x = global_mean_pool(x, batch)
+
+        # Classification head
+        x = torch.relu(self.lin1(x))
+        x = torch.dropout(x, p=self.dropout, train=self.training)
+        x = self.lin2(x)
+        return x
+    
+#================================================================================
+# Standard GINConv doesn’t take edge_weight directly. 
+# Define a custom weighted GIN that include your normalized transition probabilities (Edge Attributes).
+#================================================================================
+
+
+# ---------- DiffPool implementation (requires torch_geometric) ----------
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch_geometric.nn import GCNConv, global_mean_pool
+from torch_geometric.nn import to_dense_batch, to_dense_adj, dense_diff_pool
+
+class DiffPoolGNN(nn.Module):
+    """
+    DiffPool hierarchical GNN.
+    - node embedding GNNs produce Z (node embeddings)
+    - assignment GNNs produce S (soft cluster assignments)
+    - dense_diff_pool is used to pool to next level
+    """
+    def __init__(self,
+                 vocab_size: int,
+                 emb_dim: int = 64,
+                 gnn_hidden: int = 64,
+                 assign_hidden: int = 64,
+                 num_classes: int = 2,
+                 num_pool_layers: int = 1,
+                 clusters_per_layer: list = None,
+                 dropout: float = 0.2):
+        """
+        clusters_per_layer: list of ints specifying #clusters at each pooled layer.
+            length must equal num_pool_layers.
+        """
+        super().__init__()
+        if clusters_per_layer is None:
+            clusters_per_layer = [32] * num_pool_layers
+
+        assert len(clusters_per_layer) == num_pool_layers
+
+        self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+
+        # initial embedding conv
+        self.conv1 = GCNConv(emb_dim, gnn_hidden)
+
+        # For each pooling stage we need:
+        #  - an embedding GNN to compute node embeddings Z (here we reuse simple convs)
+        #  - an assignment GNN to compute S (we map features -> clusters)
+        self.num_pool_layers = num_pool_layers
+        self.cluster_sizes = clusters_per_layer
+
+        self.embed_convs = nn.ModuleList()
+        self.assign_convs = nn.ModuleList()
+        for i in range(num_pool_layers):
+            # embedding convs for this stage (two-layer style)
+            self.embed_convs.append(nn.ModuleList([
+                GCNConv(gnn_hidden if i > 0 else gnn_hidden, gnn_hidden),
+                GCNConv(gnn_hidden, gnn_hidden)
+            ]))
+            # assignment network: simple two-layer MLP implemented as small GCNs (accepts same edge_index)
+            self.assign_convs.append(nn.ModuleList([
+                GCNConv(gnn_hidden if i > 0 else gnn_hidden, assign_hidden),
+                GCNConv(assign_hidden, self.cluster_sizes[i])  # final produces S logits per node
+            ]))
+
+        # final MLP classifier on pooled graph representation
+        self.classifier = nn.Sequential(
+            nn.Linear(gnn_hidden, gnn_hidden//2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(gnn_hidden//2, num_classes)
+        )
+
+    def forward(self, data):
+        # data.x: [num_nodes, 1] with kmer indices -> embed
+        x_idx = data.x.view(-1)
+        x = self.embedding(x_idx)  # [N, emb_dim]
+
+        # Build dense batch tensors
+        # to_dense_batch: x_padded [B, N_max, feat], mask [B, N_max]
+        x_padded, mask = to_dense_batch(x, data.batch)  # mask: bool [B, N_max]
+        # adjacency: returns [B, N_max, N_max] using edge weights if available
+        if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+            # turn edge_attr into dense adjacency preserving weights
+            adj = to_dense_adj(data.edge_index, batch=data.batch, edge_attr=data.edge_attr.view(-1))
+        else:
+            adj = to_dense_adj(data.edge_index, batch=data.batch)  # 0/1 adjacency
+
+        # We'll iteratively apply diffpool layers
+        batch_x = x_padded  # [B, N, F]
+        batch_adj = adj     # [B, N, N]
+        batch_mask = mask   # [B, N]
+
+        link_loss = 0.0
+        ent_loss = 0.0
+
+        for i in range(self.num_pool_layers):
+            # 1) compute node embeddings Z using embed_convs applied on sparse graph
+            #    but dense_diff_pool expects dense inputs, so we produce Z in dense form.
+            # We'll compute Z by running convs on flattened node features and using original edge_index/batch
+            # Simpler: run convs on sparse data (original data) and then convert to dense.
+            # For correctness we need node features aligned: convert dense back to flat, run conv on sparse.
+            # Build a temporary Data-like object for conv inference:
+            # NOTE: convs expect edge_index that refers to flattened nodes; we can use original data for that.
+            # So compute Z_flat via convs on the sparse graph.
+            # Recreate x_flat from batch_x:
+            x_flat = torch.zeros((batch_x.size(0) * batch_x.size(1), batch_x.size(2)),
+                                 device=batch_x.device)
+            # but simpler: reuse data.x embedding and run convs on sparse graph using data.x embeddings
+            # so use the original x and data.edge_index
+            # compute Z_flat:
+            z = None
+            # use first stage input as original embedded x
+            if i == 0:
+                z = self.conv1(self.embedding(data.x.view(-1)), data.edge_index)
+                z = F.relu(z)
+            else:
+                # after pooling, adjacency and features changed; easiest approach:
+                # operate in dense mode by using batch_x and batch_adj via simple dense matmul aggregator
+                # i.e., Z = ReLU(A_hat @ batch_x @ W) — approximates GCN in dense form
+                # Define a linear layer to map batch_x features to gnn_hidden (we reuse conv weights idea)
+                # For simplicity and clarity we compute a dense message aggregation:
+                B, N, F = batch_x.size()
+                # adjacency normalization: row-normalize
+                deg = batch_adj.sum(dim=-1, keepdim=True)  # [B, N, 1]
+                deg[deg == 0] = 1.0
+                batch_x = batch_x.float()
+                z = torch.matmul(batch_adj, batch_x) / deg  # [B, N, F]
+                # map to hidden dim if necessary
+                # apply a linear projection (we'll create it dynamically if missing)
+                # But to keep implementation straightforward, reshape and apply a linear layer:
+                z = z.reshape(B * N, -1)
+                # If needed, project dimension down/up to gnn_hidden
+                # Here assume batch_x feature dim == gnn_hidden; else user should set emb_dim accordingly.
+            # Convert z -> dense [B, N, gnn_hidden] for diffpool
+            # If z is flat [N_total, hidden], convert by to_dense_batch with original data.batch
+            # but we have batch_x already; for simplicity set Z_dense = batch_x (works if dimensions match)
+            Z_dense = batch_x  # use current node features as embeddings
+
+            # 2) compute assignment S: run assign_convs in dense manner
+            # To compute S, we'll use a small MLP per node on Z_dense
+            B, N, F = Z_dense.size()
+            # Flatten and run small MLP (learnable) for assignment logits
+            # For clarity implement a simple projection:
+            # create a linear mapping from F -> num_clusters (we do it here dynamically)
+            num_clusters = self.cluster_sizes[i]
+            assign_lin = nn.Linear(F, num_clusters).to(Z_dense.device)
+            S = assign_lin(Z_dense)   # [B, N, num_clusters]
+            S = F.softmax(S, dim=-1)
+
+            # 3) apply dense_diff_pool
+            Z_pooled, A_pooled, lp, ep = dense_diff_pool(Z_dense, batch_adj, S, mask=batch_mask)
+            link_loss = link_loss + lp
+            ent_loss = ent_loss + ep
+
+            # update batch_x, batch_adj, batch_mask for next layer
+            batch_x = Z_pooled
+            batch_adj = A_pooled
+            # new mask: all clusters considered present (mask not necessary, set to None)
+            batch_mask = torch.ones(batch_x.size(0), batch_x.size(1), dtype=torch.bool, device=batch_x.device)
+
+        # After last pooling, batch_x is [B, N_pooled, F]
+        # create graph-level embeddings by mean over pooled nodes (or sum)
+        graph_emb = batch_x.mean(dim=1)  # [B, F]
+
+        out = self.classifier(graph_emb)
+        return out, (link_loss, ent_loss)
+
+
+class SimpleDiffPool(nn.Module):
+    def __init__(self, vocab_size, emb_dim=64, gnn_hidden=64, num_clusters=32, num_pool_layers=1, num_classes=2, dropout=0.2):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+        self.conv1 = GCNConv(emb_dim, gnn_hidden)
+        # linear projector for assignment (per layer); here only single pool layer supported for simplicity
+        self.assign_lin = nn.Sequential(
+            nn.Linear(gnn_hidden, gnn_hidden),
+            nn.ReLU(),
+            nn.Linear(gnn_hidden, num_clusters)
+        )
+        self.embed_lin = nn.Sequential(
+            nn.Linear(gnn_hidden, gnn_hidden),
+            nn.ReLU()
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(gnn_hidden, gnn_hidden//2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(gnn_hidden//2, num_classes)
+        )
+
+    def forward(self, data):
+        x_idx = data.x.view(-1)
+        x = self.embedding(x_idx)  # [N, emb_dim]
+        # initial GCN conv on sparse graph
+        z = F.relu(self.conv1(x, data.edge_index, edge_weight=(data.edge_attr.view(-1) if hasattr(data,'edge_attr') and data.edge_attr is not None else None)))
+        # dense batch
+        Z_dense, mask = to_dense_batch(z, data.batch)  # [B, N, F]
+        if hasattr(data, 'edge_attr') and data.edge_attr is not None:
+            A = to_dense_adj(data.edge_index, batch=data.batch, edge_attr=data.edge_attr.view(-1))
+        else:
+            A = to_dense_adj(data.edge_index, batch=data.batch)  # [B,N,N]
+        # compute assignment logits and softmax
+        S_logits = self.assign_lin(Z_dense)            # [B,N,K]
+        S = F.softmax(S_logits, dim=-1)
+        # pool
+        Z_pooled, A_pooled, link_loss, ent_loss = dense_diff_pool(Z_dense, A, S, mask)
+        # readout
+        graph_emb = Z_pooled.mean(dim=1)  # [B, F]
+        out = self.classifier(graph_emb)
+        return out, (link_loss, ent_loss)
+
+
 # ---------- Training utilities (similar API as before) ----------
 
 def train_epoch(model, loader, optimizer, device):
@@ -207,3 +457,4 @@ def evaluate(model, loader, device):
 # or
 # model = EdgeAttrGATModel(vocab_size=len(vocab))
 # Both accept Data objects where data.edge_attr contains edge weights.
+
