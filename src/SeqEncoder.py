@@ -39,7 +39,7 @@ def build_vocab(seqs, k, min_count=1):
         vocab[kmer] = i
     return vocab
 
-def seq_to_graph(seq, k, vocab, bidirectional=True):
+def seq_to_graph(seq, k, vocab, bidirectional=True, normalize=True):
     kmers = [seq[i:i+k] for i in range(len(seq)-k+1)]
     if len(kmers) == 0:
         return None
@@ -61,7 +61,23 @@ def seq_to_graph(seq, k, vocab, bidirectional=True):
 
     edges, weights = zip(*edge_counter.items())
     edge_index = torch.tensor(edges, dtype=torch.long).t().contiguous()
-    edge_attr = torch.tensor(weights, dtype=torch.float).unsqueeze(1)
+    edge_attr = torch.tensor(weights, dtype=torch.float)
+
+    if normalize:
+        row, col = edge_index
+        out_degree = torch.zeros(len(unique_kmers), dtype=torch.float)
+        for (src, _), w in zip(edges, weights):
+            out_degree[src] += w
+
+        norm_weights = []
+        for (src, _), w in zip(edges, weights):
+            if out_degree[src] > 0:
+                norm_weights.append(w / out_degree[src])
+            else:
+                norm_weights.append(0.0)
+        edge_attr = torch.tensor(norm_weights, dtype=torch.float)
+
+    edge_attr = edge_attr.unsqueeze(1)
 
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
     data.kmers = unique_kmers
