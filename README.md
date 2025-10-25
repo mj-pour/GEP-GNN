@@ -132,7 +132,7 @@ If you use this repository or its methods, please cite:
 
 > Pourmohammad, M. J., et al. (2025).  
 > *Graph Neural Networks for Cross-Species Gene Essentiality Prediction.*  
-> GitHub Repository: https://github.com/YourUsername/GEP-GNN
+> GitHub Repository: https://github.com/mj-pour/GEP-GNN
 
 ---
 
