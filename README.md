@@ -1,8 +1,8 @@
 # GEP-GNN: Graph Neural Networks for Gene Essentiality Prediction
 
-This repository implements a modular pipeline for **gene essentiality prediction** using **Graph Neural Networks (GNNs)**.  
-DNA sequences are represented as *k-mer graphs*, where edges denote transitions between k-mers, optionally weighted by transition probabilities.  
-The system supports multiple GNN architectures — **Weighted GCN**, **Edge-Aware GAT**, **Graph Isomorphism Network (GIN)**, and **Hierarchical GCN (DiffPool)** — with a unified training and evaluation pipeline.
+- This repository implements a modular pipeline for **gene essentiality prediction** using **Graph Neural Networks (GNNs)**.  
+- Gene sequences are represented as *k-mer graphs* using De-Bruijn technique, where edges denote transitions between k-mers, optionally weighted by transition probabilities for denoting frequencies of each edge.  
+- The system supports multiple GNN architectures — **Weighted GCN**, **Edge-Aware GAT**, **Graph Isomorphism Network (GIN)**, and **Hierarchical GCN (DiffPool)** — with a unified training and evaluation pipeline.
 
 ---
 
@@ -14,7 +14,6 @@ The system supports multiple GNN architectures — **Weighted GCN**, **Edge-Awar
 - [Example Experiment](#example-experiment)
 - [Modules Overview](#modules-overview)
 - [Citation](#citation)
-- [Acknowledgements](#acknowledgements)
 
 ---
 
@@ -134,16 +133,6 @@ If you use this repository or its methods, please cite:
 > Pourmohammad, M. J., et al. (2025).  
 > *Graph Neural Networks for Cross-Species Gene Essentiality Prediction.*  
 > GitHub Repository: https://github.com/YourUsername/GEP-GNN
-
----
-
-## Acknowledgements
-
-This work was inspired by:
-- Kipf & Welling (2016) — Semi-Supervised Classification with Graph Convolutional Networks
-- Velickovic et al. (2018) — Graph Attention Networks
-- Xu et al. (2019) — How Powerful Are Graph Neural Networks? (GIN)
-- Ying et al. (2018) — Hierarchical Graph Representation Learning with Differentiable Pooling (DiffPool)
 
 ---
 
