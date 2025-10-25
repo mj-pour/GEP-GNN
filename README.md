@@ -7,7 +7,6 @@ The system supports multiple GNN architectures — **Weighted GCN**, **Edge-Awar
 ---
 
 ## Table of Contents
-- [Project Structure](#project-structure)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Model Architectures](#model-architectures)
@@ -16,30 +15,6 @@ The system supports multiple GNN architectures — **Weighted GCN**, **Edge-Awar
 - [Modules Overview](#modules-overview)
 - [Citation](#citation)
 - [Acknowledgements](#acknowledgements)
-
----
-
-## Project Structure
-
-GEP-GNN/
-├── data/
-│ ├── arabidopsis_genes.fasta
-│ ├── arabidopsis_labels.txt
-│ ├── saccharomyces_genes.fasta
-│ └── saccharomyces_labels.txt
-│
-├── src/
-│ ├── SeqEncoder.py # Builds k-mer graphs from FASTA sequences
-│ ├── GNNmodel.py # Defines multiple GNN architectures
-│ ├── train_eval.py # Training, evaluation, and testing pipeline
-│ └── utils/ # Optional helper scripts (metrics, plotting, etc.)
-│
-├── models/
-│ └── saved_model.pt # Trained model checkpoints
-│
-├── main.ipynb # Example notebook for training/testing
-├── requirements.txt
-└── README.md
 
 ---
 
@@ -56,7 +31,8 @@ python -m venv venv
 source venv/bin/activate     # (Windows: venv\Scripts\activate)
 
 # Install dependencies
-pip install -r requirements.txt```
+pip install -r requirements.txt
+```
 
 ---
 
@@ -128,14 +104,14 @@ The pipeline reports both raw confusion matrix values and standard performance m
 
 Metrics:
 
-True Positive (TP)
-False Negative (FN)
-False Positive (FP)
-True Negative (TN)
-Sensitivity (SN) = TP / (TP + FN)
-Specificity (SP) = TN / (TN + FP)
-Accuracy (ACC) = (TP + TN) / (TP + FP + TN + FN)
-Area Under ROC Curve (AUC)
+- True Positive (TP)
+- False Negative (FN)
+- False Positive (FP)
+- True Negative (TN)
+- Sensitivity (SN) = TP / (TP + FN)
+- Specificity (SP) = TN / (TN + FP)
+- Accuracy (ACC) = (TP + TN) / (TP + FP + TN + FN)
+- Area Under ROC Curve (AUC)
 
 ---
 
@@ -152,43 +128,27 @@ Example of a cross-species generalization test:
 
 ## Modules Overview
 
-🔹 SeqEncoder.py
+- SeqEncoder.py
+  - Converts FASTA sequences into k-mer transition graphs
+  - Supports:
+    - Weighted edges (transition frequencies)
+    - Normalized adjacency matrices
+    - Node degree and sequence length features
+    - Outputs PyTorch Geometric Data objects
 
-Converts FASTA sequences into k-mer transition graphs
+- GNNmodel.py
+  - Defines multiple architectures:
+    - WeightedGCNModel – baseline GCN with weighted edges
+    - EdgeAttrGATModel – edge-aware attention mechanism
+    - GINModel – expressive node embedding aggregation
+    - DiffPoolGCN – hierarchical pooling for graph-level embedding
+    - Each architecture ends with a dense classifier head for binary classification.
 
-Supports:
-
-Weighted edges (transition frequencies)
-
-Normalized adjacency matrices
-
-Node degree and sequence length features
-
-Outputs PyTorch Geometric Data objects
-
-🔹 GNNmodel.py
-
-Defines multiple architectures:
-
-WeightedGCNModel – baseline GCN with weighted edges
-
-EdgeAttrGATModel – edge-aware attention mechanism
-
-GINModel – expressive node embedding aggregation
-
-DiffPoolGCN – hierarchical pooling for graph-level embedding
-
-Each architecture ends with a dense classifier head for binary classification.
-
-🔹 train_eval.py
-
-Unified training and testing functions
-
-Handles learning rate scheduling, checkpointing, and GPU detection
-
-Logs loss and metric curves per epoch
-
-Supports cross-species evaluation
+- train_eval.py
+  - Unified training and testing functions
+  - Handles learning rate scheduling, checkpointing, and GPU detection
+  - Logs loss and metric curves per epoch
+- Supports cross-species evaluation
 
 ---
 
@@ -211,14 +171,10 @@ If you use this repository or its methods, please cite:
 ## Acknowledgements
 
 This work was inspired by:
-
-Kipf & Welling (2016) — Semi-Supervised Classification with Graph Convolutional Networks
-
-Velickovic et al. (2018) — Graph Attention Networks
-
-Xu et al. (2019) — How Powerful Are Graph Neural Networks? (GIN)
-
-Ying et al. (2018) — Hierarchical Graph Representation Learning with Differentiable Pooling (DiffPool)
+- Kipf & Welling (2016) — Semi-Supervised Classification with Graph Convolutional Networks
+- Velickovic et al. (2018) — Graph Attention Networks
+- Xu et al. (2019) — How Powerful Are Graph Neural Networks? (GIN)
+- Ying et al. (2018) — Hierarchical Graph Representation Learning with Differentiable Pooling (DiffPool)
 
 ---
 
