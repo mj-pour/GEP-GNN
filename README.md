@@ -36,23 +36,9 @@ pip install -r requirements.txt
 
 ---
 
-## Core Dependencies
-
-torch
-torch-geometric
-networkx
-numpy
-pandas
-matplotlib
-scikit-learn
-
----
-
 ## Usage
 
-1️ Build a Graph Dataset
-
-Convert sequences into k-mer graphs with labels:
+1. Build a Graph Dataset
 
 ```python
 from src.SeqEncoder import build_dataset
@@ -64,7 +50,7 @@ graphs, vocab = build_dataset(
 )
 ```
 
-2️ Train a Model
+2. Train a Model
 
 ```python
 from src.GNNmodel import WeightedGCNModel
@@ -74,7 +60,7 @@ model = WeightedGCNModel(vocab_size=len(vocab))
 train_model(graphs, model, lr=1e-4, batch_size=32, epochs=20, model_name="models/ath-GCN.pt")
 ```
 
-3️ Test on Another Species
+3. Test on Another Species
 
 ```python
 from src.train_eval import test_model
@@ -115,17 +101,6 @@ Metrics:
 
 ---
 
-## Example Experiment
-
-Example of a cross-species generalization test:
-
-| Train Species   | Test Species    | SN   | SP   | ACC  | AUC  |
-| --------------- | --------------- | ---- | ---- | ---- | ---- |
-| *A. thaliana*   | *S. cerevisiae* | 0.91 | 0.78 | 0.85 | 0.80 |
-| *S. cerevisiae* | *A. thaliana*   | 0.88 | 0.81 | 0.84 | 0.83 |
-
----
-
 ## Modules Overview
 
 - SeqEncoder.py
@@ -148,13 +123,7 @@ Example of a cross-species generalization test:
   - Unified training and testing functions
   - Handles learning rate scheduling, checkpointing, and GPU detection
   - Logs loss and metric curves per epoch
-- Supports cross-species evaluation
-
----
-
-## Example Results Visualization
-
-<p align="center"> <img src="docs/learning_curve_example.png" alt="Learning Curve" width="60%"> </p>
+  - Supports cross-species evaluation
 
 ---
 
