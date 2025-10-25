@@ -39,7 +39,7 @@ def build_vocab(seqs, k, min_count=1):
         vocab[kmer] = i
     return vocab
 
-def seq_to_graph(seq, k, vocab, bidirectional=True, normalize=True):
+def seq_to_graph(seq, k, vocab, bidirectional=False, normalize=True):
     kmers = [seq[i:i+k] for i in range(len(seq)-k+1)]
     if len(kmers) == 0:
         return None
