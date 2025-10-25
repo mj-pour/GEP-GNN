@@ -24,22 +24,17 @@ from torch_geometric.utils import add_self_loops, softmax
 
 
 class WeightedGCNModel(nn.Module):
-    """GCN model that uses edge_attr as edge_weight for convolution.
-
-    Expected Data fields:
-      - x: LongTensor node feature indices (embedding happens inside)
-      - edge_index: [2, E]
-      - edge_attr: [E, 1] (normalized or raw counts) -> we use flattened as edge_weight
-      - batch: [num_nodes] (when using DataLoader with batching)
-    """
     def __init__(self, vocab_size, emb_dim=128, hidden_dim=128, num_layers=2, dropout=0.2):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.convs = nn.ModuleList()
+        self.dropout = dropout
+        
         in_dim = emb_dim
         for i in range(num_layers):
             self.convs.append(GCNConv(in_dim, hidden_dim))
             in_dim = hidden_dim
+            
         self.pool = global_mean_pool
         self.mlp = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim//2),
@@ -53,17 +48,19 @@ class WeightedGCNModel(nn.Module):
         x = self.embedding(x_idx)
         edge_index = data.edge_index
 
-        # Prefer the passed edge_weight if available, otherwise use from data
         if edge_weight is None and hasattr(data, 'edge_attr') and data.edge_attr is not None:
             edge_weight = data.edge_attr.view(-1)
         
-        for conv in self.convs:
-            x = F.relu(conv(x, edge_index, edge_weight=edge_weight))
+        for i, conv in enumerate(self.convs):
+            x = conv(x, edge_index, edge_weight=edge_weight)
+            x = F.relu(x)
+            if i < len(self.convs) - 1 and self.dropout > 0:
+                x = F.dropout(x, p=self.dropout, training=self.training)
 
         batch = data.batch if hasattr(data, 'batch') else torch.zeros(x.size(0), dtype=torch.long, device=x.device)
         g = self.pool(x, batch)
         out = self.mlp(g)
-        return out
+        return F.softmax(out, dim=1) 
 
 
 
