@@ -6,17 +6,6 @@
 
 ---
 
-## Table of Contents
-- [Installation](#installation)
-- [Usage](#usage)
-- [Model Architectures](#model-architectures)
-- [Evaluation Metrics](#evaluation-metrics)
-- [Example Experiment](#example-experiment)
-- [Modules Overview](#modules-overview)
-- [Citation](#citation)
-
----
-
 ## Installation
 
 Clone the repository and install dependencies:
