@@ -313,16 +313,15 @@ def train(
     # --- Loss Curves ---
     plt.subplot(1, 2, 1)
     plt.plot(train_losses, label="Train Loss", linewidth=2)
-    plt.plot(val_losses, label="Validation Loss", linewidth=2, linestyle='--')
     plt.xlabel("Epoch")
     plt.ylabel("Loss")
     plt.legend()
-    plt.title("Loss Curves")
+    plt.title("Loss Curve")
 
     # --- AUC Curves ---
     plt.subplot(1, 2, 2)
     plt.plot(train_aucs, label="Train AUC", linewidth=2)
-    plt.plot(val_aucs, label="Validation AUC", linewidth=2, linestyle='--')
+    plt.plot(val_aucs, label="Validation AUC", linewidth=2)
     plt.xlabel("Epoch")
     plt.ylabel("AUC")
     plt.legend()
