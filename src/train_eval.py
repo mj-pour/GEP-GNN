@@ -380,7 +380,7 @@ def test(
     test_f1 = f1_score(y_true, y_pred)
     precision = precision_score(y_true, y_pred)
     recall = recall_score(y_true, y_pred)
-    conf_matrix = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel().tolist()
 
     # --- Display summary ---
     print("\n=== Final Test Results ===")
@@ -390,7 +390,10 @@ def test(
     print(f"F1 Score:  {test_f1:.4f}")
     print(f"Precision: {precision:.4f}")
     print(f"Recall:    {recall:.4f}")
-    print("Confusion Matrix:\n", conf_matrix)
+    print(f"True Negative: {tn}")
+    print(f"False Positive: {fp}")
+    print(f"False Negative: {fn}")
+    print(f"True Positive: {tp}")
 
     # Prepare results
     results = {
@@ -400,7 +403,10 @@ def test(
         'test_f1': test_f1,
         'test_precision': precision,
         'test_recall': recall,
-        'confusion_matrix': conf_matrix
+        'TN': tn,
+        'FP': fp,
+        'FN': fn,
+        'TP': tp
     }
     
     if return_predictions:
