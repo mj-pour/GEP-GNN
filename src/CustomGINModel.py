@@ -59,6 +59,8 @@ class WeightedGINConv(MessagePassing):
     def __init__(self, mlp, eps=0.0, train_eps=True):
         super(WeightedGINConv, self).__init__(aggr='add')
         self.mlp = mlp
+
+        # whether the eps parameter is learnable during training or treated as a fixed constant
         if train_eps:
             self.eps = nn.Parameter(torch.Tensor([eps]))
         else:
@@ -69,13 +71,24 @@ class WeightedGINConv(MessagePassing):
         edge_index, edge_attr = add_self_loops(
             edge_index, edge_attr=edge_attr, fill_value=1.0, num_nodes=x.size(0)
         )
-
-        # Message passing
+        # Calling Message function (core message passing engine from PyTorch Geometric)
         out = self.propagate(edge_index, x=x, edge_attr=edge_attr)
+        """
+        When you call propagate(), It automatically handles:
+            1. Message Generation
+                Calls your message() function for each edge
+                Passes relevant data: x_j (neighbor features), edge_attr (edge weights)
+                Your message() function defines how to combine them
 
+            2. Aggregation
+                Uses the aggregation method you specified (aggr='add' in __init__)
+                Sums all incoming messages for each node
+                Could also use mean, max, etc.
+        """
         # Update with epsilon (self-weight)
         out = (1 + self.eps) * x + out
-        return self.mlp(out)
+
+        return self.mlp(out) # new_features = MLP((1 + ε) × self_features + Σ(edge_weight × neighbor_features))
 
     def message(self, x_j, edge_attr):
         # Each message is scaled by the edge weight
@@ -201,6 +214,7 @@ class model_2(nn.Module):
 
 class model_3(nn.Module):
     """Weighted GIN model with Pre-Normalization and
+        without ReLU in forward pass of GIN and
         without dropout for MLP."""
     def __init__(self, vocab_size, emb_dim=128, hidden_dim=128, num_layers=3, dropout=0.3):
         super(model_3, self).__init__()
@@ -252,7 +266,7 @@ class model_3(nn.Module):
             # Apply LayerNorm BEFORE the convolution
             x = self.norms[i](x)
             x = conv(x, edge_index, edge_attr=edge_attr)
-            x = F.relu(x)
+            # x = F.relu(x)
             x = F.dropout(x, p=self.dropout, training=self.training)
 
         batch = getattr(data, "batch", torch.zeros(x.size(0), dtype=torch.long, device=x.device))
