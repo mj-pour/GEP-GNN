@@ -55,7 +55,7 @@ def train(
     print(f"Train size: {len(trainset)}, Validation size: {len(valset)}")
 
     # === Optimizer and Scheduler ===
-    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=5e-5)
     scheduler = None
     if use_scheduler:
         scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=scheduler_patience, factor=scheduler_factor)
