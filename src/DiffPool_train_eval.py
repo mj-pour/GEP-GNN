@@ -11,6 +11,33 @@ from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_
 from collections import Counter
 import matplotlib.pyplot as plt
 
+class EarlyStopping:
+    def __init__(self, patience=20, min_delta=0.0, verbose=True, save_path="best_model.pt"):
+        self.patience = patience
+        self.min_delta = min_delta
+        self.verbose = verbose
+        self.save_path = save_path
+
+        self.best_loss = float('inf')
+        self.counter = 0
+        self.should_stop = False
+
+    def step(self, val_loss, model):
+        if val_loss < self.best_loss - self.min_delta:
+            self.best_loss = val_loss
+            self.counter = 0
+            torch.save(model.state_dict(), self.save_path)
+            if self.verbose:
+                print(f"  → EarlyStopping: Validation loss improved to {val_loss:.4f}, saving model.")
+        else:
+            self.counter += 1
+            if self.verbose:
+                print(f"  → EarlyStopping: No improvement ({self.counter}/{self.patience})")
+
+            if self.counter >= self.patience:
+                self.should_stop = True
+
+
 def train(
         graphs,
         model,
@@ -21,6 +48,7 @@ def train(
         use_scheduler=True,
         scheduler_patience=10,
         scheduler_factor=0.5,
+        earlystop_patience=20,
         use_gradient_clipping=True,
         clip_value=1.0,
         lambda_aux = 1e-3,
@@ -55,7 +83,7 @@ def train(
     print(f"Train size: {len(trainset)}, Validation size: {len(valset)}")
 
     # === Optimizer and Scheduler ===
-    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=5e-5)
+    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
     scheduler = None
     if use_scheduler:
         scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=scheduler_patience, factor=scheduler_factor)
@@ -63,13 +91,23 @@ def train(
     # === Loss Function ===
     criterion = torch.nn.CrossEntropyLoss()
 
+    
+    # ---- EarlyStopping ----
+    early_stopper = EarlyStopping(
+        patience=earlystop_patience,
+        save_path=model_name,
+        verbose=True
+    )
+
+    print(f"Train={len(trainset)}, Val={len(valset)}")
+
     # === Logging Containers ===
     train_losses, val_losses = [], []
     train_aux_losses = []
     train_aucs, val_aucs = [], []
     train_accuracies, val_accuracies = [], []
 
-    best_val_loss = float('inf')
+    # best_val_loss = float('inf')
 
     print(f"\n🚀 Starting training for {epoch_n} epochs on {device.upper()}...\n")
 
@@ -143,16 +181,22 @@ def train(
         if use_scheduler and scheduler is not None:
             scheduler.step(val_loss)
 
-        # Save the best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), model_name)
+        # # Save the best model
+        # if val_loss < best_val_loss:
+        #     best_val_loss = val_loss
+        #     torch.save(model.state_dict(), model_name)
 
         dt = time.time() - t0
         print(f"Epoch [{epoch:03d}/{epoch_n}] "
               f"Train CE Loss: {avg_train_loss:.4f} | Train AUX Loss: {avg_train_aux_loss:.4f} | Train AUC: {train_auc:.3f} | Train Acc: {train_acc:.3f} "
               f"| Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.3f} | Val Acc: {val_acc:.3f} "
               f"| Time: {dt:.1f}s")
+        
+        # ---- Early stopping ----
+        early_stopper.step(val_loss, model)
+        if early_stopper.should_stop:
+            print("\n⛔ Early stopping triggered!")
+            break
 
     print(f"\n✅ Training completed. Best model saved as: {model_name}")
 
@@ -210,7 +254,7 @@ def test(
     with torch.no_grad():
         for batch in test_loader:
             batch = batch.to(device)
-            out, _ = model(batch)
+            out, (_, _) = model(batch)
             loss = criterion(out, batch.y)
             total_test_loss += loss.item()
 
