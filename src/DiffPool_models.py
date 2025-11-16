@@ -125,7 +125,17 @@ import torch.nn.functional as F
 from torch_geometric.nn import DenseSAGEConv, dense_diff_pool
 from torch_geometric.utils import to_dense_batch, to_dense_adj
 
+class DenseSAGEBlock(nn.Module):
+    def __init__(self, in_dim, out_dim):
+        super().__init__()
+        self.sage = DenseSAGEConv(in_dim, out_dim)
+        self.lin = nn.Linear(out_dim, out_dim)
 
+    def forward(self, x, adj):
+        x = self.sage(x, adj)
+        x = F.relu(x)
+        return self.lin(x)
+            
 class WeightedSAGEDiffPool(nn.Module):
     def __init__(self, vocab_size, emb_dim=128, hidden_dim=128,
                  cluster_ratio1=0.25, cluster_ratio2=0.10,
@@ -138,24 +148,24 @@ class WeightedSAGEDiffPool(nn.Module):
         self.cluster_ratio2 = cluster_ratio2
 
         # -------- Block 1 (Before 1st DiffPool) --------
-        self.gnn_embed1 = DenseSAGEConv(emb_dim, hidden_dim)
-        self.gnn_embed2 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_assign1 = DenseSAGEConv(emb_dim, hidden_dim)
+        self.gnn_embed1 = DenseSAGEBlock(emb_dim, hidden_dim)
+        self.gnn_embed2 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_assign1 = DenseSAGEBlock(emb_dim, hidden_dim)
 
         self.norm1 = nn.LayerNorm(hidden_dim)
 
         # -------- Block 2 (After 1st DiffPool) --------
-        self.gnn_embed3 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_embed4 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_embed5 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_assign2 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.gnn_embed3 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_embed4 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_embed5 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_assign2 = DenseSAGEBlock(hidden_dim, hidden_dim)
 
         self.norm2 = nn.LayerNorm(hidden_dim)
 
         # -------- Block 3 (After 2nd DiffPool) --------
-        self.gnn_embed6 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_embed7 = DenseSAGEConv(hidden_dim, hidden_dim)
-        self.gnn_embed8 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.gnn_embed6 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_embed7 = DenseSAGEBlock(hidden_dim, hidden_dim)
+        self.gnn_embed8 = DenseSAGEBlock(hidden_dim, hidden_dim)
 
         self.norm3 = nn.LayerNorm(hidden_dim)
 
@@ -217,124 +227,144 @@ class WeightedSAGEDiffPool(nn.Module):
         g = z.mean(dim=1)
         out = self.mlp_out(g)
         return out, (l1 + l2 + e1 + e2)
-
-# class DenseSAGEBlock(nn.Module):
-#     """GraphSAGE + ReLU + Linear projection (MLP style)"""
-#     def __init__(self, in_dim, out_dim):
-#         super().__init__()
-#         self.sage = DenseSAGEConv(in_dim, out_dim)
-#         self.lin = nn.Linear(out_dim, out_dim)
-
-#     def forward(self, x, adj):
-#         x = self.sage(x, adj)
-#         x = F.relu(x)
-#         return self.lin(x)
-
-
-# class DiffPoolSAGE(nn.Module):
-#     def __init__(self, vocab_size, emb_dim=128, hidden_dim=128,
-#                  cluster_ratio1=0.25, cluster_ratio2=0.10,
-#                  num_classes=2, dropout=0.3):
-
-#         super().__init__()
-
-#         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
-#         self.dropout = dropout
-#         self.cluster_ratio1 = cluster_ratio1
-#         self.cluster_ratio2 = cluster_ratio2
-
-#         # ---------- GNN Embed Blocks ----------
-#         self.embed1 = DenseSAGEBlock(emb_dim, hidden_dim)
-#         self.embed2 = DenseSAGEBlock(hidden_dim, hidden_dim)
-
-#         self.assign1 = DenseSAGEBlock(emb_dim, hidden_dim)
-
-#         self.norm1 = nn.LayerNorm(hidden_dim)
-
-#         # ----- After 1st DiffPool -----
-#         self.embed3 = DenseSAGEBlock(hidden_dim, hidden_dim)
-#         self.embed4 = DenseSAGEBlock(hidden_dim, hidden_dim)
-#         self.embed5 = DenseSAGEBlock(hidden_dim, hidden_dim)
-
-#         self.assign2 = DenseSAGEBlock(hidden_dim, hidden_dim)
-
-#         self.norm2 = nn.LayerNorm(hidden_dim)
-
-#         # ----- After 2nd DiffPool -----
-#         self.embed6 = DenseSAGEBlock(hidden_dim, hidden_dim)
-#         self.embed7 = DenseSAGEBlock(hidden_dim, hidden_dim)
-#         self.embed8 = DenseSAGEBlock(hidden_dim, hidden_dim)
-
-#         self.norm3 = nn.LayerNorm(hidden_dim)
-
-#         self.mlp_out = nn.Sequential(
-#             nn.Linear(hidden_dim, hidden_dim // 2),
-#             nn.ReLU(),
-#             nn.Dropout(dropout),
-#             nn.Linear(hidden_dim // 2, num_classes)
-#         )
-
-#     def forward(self, data):
-
-#         x_idx = data.x.view(-1)
-#         x = self.embedding(x_idx)
-
-#         batch = getattr(data, "batch", torch.zeros(x.size(0), dtype=torch.long, device=x.device))
-#         x, mask = to_dense_batch(x, batch)
-#         adj = to_dense_adj(data.edge_index, batch, data.edge_attr)
+    
+class SimpleSAGEDiffPool(nn.Module):
+    def __init__(self, vocab_size, emb_dim=64, hidden_dim=64,
+                 cluster_ratio1=0.5, cluster_ratio2=0.25,  # Less aggressive pooling
+                 num_classes=2, dropout=0.2):  # Reduced dropout
+        super(SimpleSAGEDiffPool, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+        self.dropout = dropout
         
+        # Reduced cluster ratios
+        self.cluster_ratio1 = cluster_ratio1
+        self.cluster_ratio2 = cluster_ratio2
 
-#         x_idx = data.x.view(-1)
-#         x = self.embedding(x_idx)
-#         edge_index, edge_attr = data.edge_index, data.edge_attr
-#         if edge_attr is not None:
-#             edge_attr = edge_attr.view(-1)
+        # -------- Simplified Architecture --------
+        # Block 1: Pre-pooling
+        self.embed1 = DenseSAGEConv(emb_dim, hidden_dim)
+        self.assign1 = DenseSAGEConv(emb_dim, hidden_dim)
+        self.norm1 = nn.BatchNorm1d(hidden_dim)  # BatchNorm often helps convergence
 
-#         batch = getattr(data, "batch", torch.zeros(x.size(0), dtype=torch.long, device=x.device))
-#         x_dense, mask = to_dense_batch(x, batch)
-#         adj_dense = to_dense_adj(edge_index, batch, edge_attr)
+        # Block 2: After 1st pooling
+        self.embed2 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.assign2 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.norm2 = nn.BatchNorm1d(hidden_dim)
 
-#         # Dynamically determine cluster sizes
-#         N_max = x_dense.size(1)
-#         assign_dim1 = max(2, int(self.cluster_ratio1 * N_max))
-#         assign_dim2 = max(2, int(self.cluster_ratio2 * assign_dim1))
+        # Block 3: After 2nd pooling (final)
+        self.embed3 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.norm3 = nn.BatchNorm1d(hidden_dim)
 
+        # Simplified readout
+        self.mlp_out = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, num_classes)
+        )
 
-#         N = x.size(1)
-#         c1 = max(2, int(self.cluster_ratio1 * N))
-#         c2 = max(2, int(self.cluster_ratio2 * c1))
+    def forward(self, data):
+        x_idx = data.x.view(-1)
+        x = self.embedding(x_idx)
+        edge_index, edge_attr = data.edge_index, data.edge_attr
 
-#         # ---------------- Block 1 ----------------
-#         h = self.embed1(x, adj)
-#         h = self.embed2(h, adj)
-#         s = self.assign1(x, adj)[..., :c1]   # cluster scores
-#         s = F.softmax(s, dim=-1)
+        batch = getattr(data, "batch", torch.zeros(x.size(0), dtype=torch.long, device=x.device))
+        x_dense, mask = to_dense_batch(x, batch)
+        
+        # Handle adjacency matrix
+        if edge_attr is not None:
+            adj_dense = to_dense_adj(edge_index, batch, edge_attr)
+            if adj_dense.dim() == 4:
+                adj_dense = adj_dense.squeeze(-1)
+        else:
+            adj_dense = to_dense_adj(edge_index, batch)
 
-#         h, adj, l1, e1 = dense_diff_pool(h, adj, s, mask)
+        # Dynamic cluster sizes
+        N_max = x_dense.size(1)
+        assign_dim1 = max(2, int(self.cluster_ratio1 * N_max))
+        assign_dim2 = max(2, int(self.cluster_ratio2 * assign_dim1))
 
-#         h = self.norm1(h)
-#         h = F.dropout(h, self.dropout, training=self.training)
+        # ========== Block 1 ==========
+        h = F.relu(self.embed1(x_dense, adj_dense))
+        s = F.softmax(self.assign1(x_dense, adj_dense)[..., :assign_dim1], dim=-1)
+        h, adj, l1, e1 = dense_diff_pool(h, adj_dense, s, mask)
+        
+        # Apply norm - reshape for BatchNorm1d
+        h_flat = h.view(-1, h.size(-1))
+        h = self.norm1(h_flat).view(h.shape)
+        h = F.dropout(h, p=self.dropout, training=self.training)
 
-#         # ---------------- Block 2 ----------------
-#         h = self.embed3(h, adj)
-#         h = self.embed4(h, adj)
-#         h = self.embed5(h, adj)
-#         s = self.assign2(h, adj)[..., :c2]
-#         s = F.softmax(s, dim=-1)
+        # ========== Block 2 ==========
+        h = F.relu(self.embed2(h, adj))
+        s = F.softmax(self.assign2(h, adj)[..., :assign_dim2], dim=-1)
+        h, adj, l2, e2 = dense_diff_pool(h, adj, s)
+        
+        h_flat = h.view(-1, h.size(-1))
+        h = self.norm2(h_flat).view(h.shape)
+        h = F.dropout(h, p=self.dropout, training=self.training)
 
-#         h, adj, l2, e2 = dense_diff_pool(h, adj, s)
+        # ========== Block 3 ==========
+        h = F.relu(self.embed3(h, adj))
+        h_flat = h.view(-1, h.size(-1))
+        h = self.norm3(h_flat).view(h.shape)
 
-#         h = self.norm2(h)
-#         h = F.dropout(h, self.dropout, training=self.training)
+        # Global mean pooling
+        g = h.mean(dim=1)
+        out = self.mlp_out(g)
+        
+        return out, (l1 + l2 + e1 + e2)
 
-#         # ---------------- Block 3 ----------------
-#         h = self.embed6(h, adj)
-#         h = self.embed7(h, adj)
-#         h = self.embed8(h, adj)
-#         h = self.norm3(h)
+class MinimalSAGEDiffPool(nn.Module):
+    def __init__(self, vocab_size, emb_dim=64, hidden_dim=64,
+                 cluster_ratio=0.5, num_classes=2, dropout=0.2):
+        super(MinimalSAGEDiffPool, self).__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
+        self.dropout = dropout
+        self.cluster_ratio = cluster_ratio
 
-#         # ---------------- Readout ----------------
-#         g = h.mean(dim=1)
-#         out = self.mlp_out(g)
+        # Minimal architecture - just one pooling step
+        self.pre_pool1 = DenseSAGEConv(emb_dim, hidden_dim)
+        self.pre_pool2 = DenseSAGEConv(hidden_dim, hidden_dim)
+        self.assign = DenseSAGEConv(emb_dim, hidden_dim)
+        
+        self.post_pool = DenseSAGEConv(hidden_dim, hidden_dim)
+        
+        self.norm = nn.BatchNorm1d(hidden_dim)
+        
+        # Simple classifier
+        self.classifier = nn.Linear(hidden_dim, num_classes)
 
-#         return out, (l1 + l2 + e1 + e2)
+    def forward(self, data):
+        x_idx = data.x.view(-1)
+        x = self.embedding(x_idx)
+        edge_index = data.edge_index
+
+        batch = getattr(data, "batch", torch.zeros(x.size(0), dtype=torch.long, device=x.device))
+        x_dense, mask = to_dense_batch(x, batch)
+        adj_dense = to_dense_adj(edge_index, batch)
+        
+        if adj_dense.dim() == 4:
+            adj_dense = adj_dense.squeeze(-1)
+
+        # Single pooling step
+        N_max = x_dense.size(1)
+        assign_dim = max(2, int(self.cluster_ratio * N_max))
+
+        # Pre-pool processing
+        h = F.relu(self.pre_pool1(x_dense, adj_dense))
+        h = F.relu(self.pre_pool2(h, adj_dense))
+        
+        # Pooling
+        s = F.softmax(self.assign(x_dense, adj_dense)[..., :assign_dim], dim=-1)
+        h, adj, link_loss, ent_loss = dense_diff_pool(h, adj_dense, s, mask)
+        
+        # Post-pool processing
+        h = F.relu(self.post_pool(h, adj))
+        
+        # Normalization and readout
+        h_flat = h.view(-1, h.size(-1))
+        h = self.norm(h_flat).view(h.shape)
+        g = h.mean(dim=1)
+        
+        out = self.classifier(g)
+        return out, (link_loss + ent_loss)

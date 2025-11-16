@@ -107,8 +107,6 @@ def train(
     train_aucs, val_aucs = [], []
     train_accuracies, val_accuracies = [], []
 
-    # best_val_loss = float('inf')
-
     print(f"\n🚀 Starting training for {epoch_n} epochs on {device.upper()}...\n")
 
     for epoch in range(1, epoch_n + 1):
@@ -180,11 +178,6 @@ def train(
 
         if use_scheduler and scheduler is not None:
             scheduler.step(val_loss)
-
-        # # Save the best model
-        # if val_loss < best_val_loss:
-        #     best_val_loss = val_loss
-        #     torch.save(model.state_dict(), model_name)
 
         dt = time.time() - t0
         print(f"Epoch [{epoch:03d}/{epoch_n}] "
