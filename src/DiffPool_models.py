@@ -230,17 +230,16 @@ class WeightedSAGEDiffPool(nn.Module):
     
 class SimpleSAGEDiffPool(nn.Module):
     def __init__(self, vocab_size, emb_dim=64, hidden_dim=64,
-                 cluster_ratio1=0.5, cluster_ratio2=0.25,  # Less aggressive pooling
-                 num_classes=2, dropout=0.2):  # Reduced dropout
+                 cluster_ratio1=0.5, cluster_ratio2=0.25,
+                 num_classes=2, dropout=0.2):
         super(SimpleSAGEDiffPool, self).__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dim, padding_idx=0)
         self.dropout = dropout
         
-        # Reduced cluster ratios
+        # cluster ratios
         self.cluster_ratio1 = cluster_ratio1
         self.cluster_ratio2 = cluster_ratio2
 
-        # -------- Simplified Architecture --------
         # Block 1: Pre-pooling
         self.embed1 = DenseSAGEConv(emb_dim, hidden_dim)
         self.assign1 = DenseSAGEConv(emb_dim, hidden_dim)
