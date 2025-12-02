@@ -1,0 +1,309 @@
+import torch
+import random
+import numpy as np
+import time
+from torch.utils.data import WeightedRandomSampler
+from torch_geometric.loader import DataLoader
+from torch.optim import Adam
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from sklearn.metrics import accuracy_score, roc_auc_score
+from sklearn.metrics import f1_score, confusion_matrix, precision_score, recall_score
+from collections import Counter
+import matplotlib.pyplot as plt
+
+def train(
+        graphs,
+        model,
+        batch_size=64,
+        epoch_n=50,
+        learning_rate=1e-3,
+        weighted_sampling=True,
+        use_scheduler=True,
+        scheduler_patience=10,
+        scheduler_factor=0.5,
+        use_gradient_clipping=True,
+        clip_value=1.0,
+        model_path="model.pt",
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        val_split=0.2,
+        random_seed=111,
+        early_stopping_patience=15,
+        early_stopping_min_delta=0.001,
+):
+    random.seed(random_seed)
+    torch.manual_seed(random_seed)
+
+    # === Device setup ===
+    model = model.to(device)
+
+    # === Dataset Split ===
+    data_indices = list(range(len(graphs)))
+    test_indices = random.sample(data_indices, int(len(graphs) * val_split))
+    trainset = [graphs[i] for i in data_indices if i not in test_indices]
+    valset = [graphs[i] for i in data_indices if i in test_indices]
+
+    # === Weighted Sampling (for class imbalance) ===
+    if weighted_sampling:
+        label_count = Counter([int(data.y) for data in graphs])
+        weights = [1.0 / label_count[int(data.y)] for data in trainset]
+        sampler = WeightedRandomSampler(weights, num_samples=len(trainset), replacement=True)
+        train_loader = DataLoader(trainset, batch_size=batch_size, sampler=sampler)
+    else:
+        train_loader = DataLoader(trainset, batch_size=batch_size, shuffle=True)
+
+    val_loader = DataLoader(valset, batch_size=batch_size, shuffle=False)
+
+    print(f"Train size: {len(trainset)}, Validation size: {len(valset)}")
+
+    # === Optimizer and Scheduler ===
+    optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
+    scheduler = None
+    if use_scheduler:
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', patience=scheduler_patience, factor=scheduler_factor)
+
+    # === Loss Function ===
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # === Logging Containers ===
+    train_losses, val_losses = [], []
+    train_aucs, val_aucs = [], []
+    train_accuracies, val_accuracies = [], []
+
+    best_val_loss = float('inf')
+    best_val_auc = 0.0
+    early_stopping_counter = 0
+    best_epoch = 0
+
+    print(f"\n########## Training for {epoch_n} epochs on {device.upper()}...")
+
+    for epoch in range(1, epoch_n + 1):
+        t0 = time.time()
+        model.train()
+        total_loss = 0
+        y_true, y_pred, y_prob = [], [], []
+
+        for batch in train_loader:
+            batch = batch.to(device)
+            optimizer.zero_grad()
+
+            out = model(batch)
+            loss = criterion(out, batch.y)
+            loss.backward()
+
+            # Optional gradient clipping
+            if use_gradient_clipping:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), clip_value)
+
+            optimizer.step()
+
+            total_loss += loss.item()
+
+            preds = out.argmax(dim=1).detach().cpu().numpy()
+            probs = torch.softmax(out, dim=1)[:, 1].detach().cpu().numpy()
+            labels = batch.y.detach().cpu().numpy()
+
+            y_pred.extend(preds)
+            y_prob.extend(probs)
+            y_true.extend(labels)
+
+        avg_train_loss = total_loss / len(train_loader)
+        train_acc = accuracy_score(y_true, y_pred)
+        train_auc = roc_auc_score(y_true, y_prob) if len(set(y_true)) > 1 else np.nan
+        train_losses.append(avg_train_loss)
+        train_accuracies.append(train_acc)
+        train_aucs.append(train_auc)
+
+        # === Validation Phase ===
+        model.eval()
+
+        y_true_val, y_pred_val, y_prob_val = [], [], []
+
+        with torch.no_grad():
+            total_val_loss = 0
+            for batch in val_loader:
+                batch = batch.to(device)
+                out = model(batch)
+                
+                loss = criterion(out, batch.y)
+                total_val_loss += loss.item()
+
+                preds = out.argmax(dim=1).cpu().numpy()
+                probs = torch.softmax(out, dim=1)[:, 1].cpu().numpy()
+                labels = batch.y.cpu().numpy()
+
+                y_true_val.extend(labels)
+                y_pred_val.extend(preds)
+                y_prob_val.extend(probs)
+
+        val_loss = total_val_loss / len(val_loader)
+        val_acc = accuracy_score(y_true_val, y_pred_val)
+        val_auc = roc_auc_score(y_true_val, y_prob_val) if len(set(y_true_val)) > 1 else np.nan
+        val_losses.append(val_loss)
+        val_accuracies.append(val_acc)
+        val_aucs.append(val_auc)
+
+        if use_scheduler and scheduler is not None:
+            scheduler.step(val_loss)
+
+        dt = time.time() - t0
+        print(f"- Epoch [{epoch:03d}/{epoch_n}] "
+              f"Train Loss: {avg_train_loss:.4f} | Train AUC: {train_auc:.3f} | Train Acc: {train_acc:.3f} "
+              f"| Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.3f} | Val Acc: {val_acc:.3f} "
+              f"| EarlyStop: {early_stopping_counter}/{early_stopping_patience} | Time: {dt:.1f}s")
+        
+        # Save the best model based on validation loss
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), model_path)
+
+        # === Early Stopping Logic based on Validation AUC ===
+        current_auc = val_auc if not np.isnan(val_auc) else 0.0
+        
+        if current_auc > best_val_auc + early_stopping_min_delta:
+            best_val_auc = current_auc
+            early_stopping_counter = 0
+            best_epoch = epoch
+            print(f"+ New best AUC: {best_val_auc:.4f} (epoch {epoch})")
+        else:
+            early_stopping_counter += 1
+
+        # Check early stopping condition
+        if early_stopping_counter >= early_stopping_patience:
+            print(f"XXXXXXXXXX Early stopping triggered at epoch {epoch}!") 
+            break
+       
+    if early_stopping_counter < early_stopping_patience:
+        print(f"\n########## Training completed for {epoch_n} epochs.")
+        print("=================================================")
+        print(f"Best validation AUC: {best_val_auc:.4f} achieved at epoch {best_epoch}")
+        print("=================================================")
+    else:
+        print("=================================================")
+        print(f"Best validation AUC: {best_val_auc:.4f} achieved at epoch {best_epoch}")
+        print("=================================================")
+
+    # Prepare results
+    results = {
+        'train_losses': train_losses,
+        'train_accuracies': train_accuracies,
+        'train_aucs': train_aucs,
+        'val_losses': val_losses,
+        'val_accuracies': val_accuracies,
+        'val_aucs': val_aucs,
+    }
+
+    # === Plot Learning Curves ===
+    plt.figure(figsize=(12, 5))
+
+    # --- Loss Curves ---
+    plt.subplot(1, 2, 1)
+    plt.plot(train_losses, label="Train Loss", linewidth=2)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Loss Curve")
+
+    # --- AUC Curves ---
+    plt.subplot(1, 2, 2)
+    plt.plot(train_aucs, label="Train AUC", linewidth=2)
+    plt.plot(val_aucs, label="Validation AUC", linewidth=2)
+    plt.axvline(x=best_epoch-1, color='r', linestyle='--', alpha=0.7, label=f'Best Epoch {best_epoch}')
+    plt.xlabel("Epoch")
+    plt.ylabel("AUC")
+    plt.legend()
+    plt.title("AUC per Epoch")
+
+    plt.tight_layout()
+    plt.show()
+
+    return results
+
+
+def test(
+        test_graphs,
+        model,
+        model_path,
+        batch_size=64,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        return_predictions=False
+):
+
+    # --- Load model and prepare ---
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+
+    # --- Data Loader ---
+    test_loader = DataLoader(test_graphs, batch_size=batch_size, shuffle=False)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # --- Logging containers ---
+    total_test_loss = 0
+    y_true, y_pred, y_prob = [], [], []
+
+    print(f"########## Testing on {len(test_graphs)} samples...")
+
+    # --- Evaluation loop ---
+    with torch.no_grad():
+        for batch in test_loader:
+            batch = batch.to(device)
+            out = model(batch)
+            loss = criterion(out, batch.y)
+            total_test_loss += loss.item()
+
+            preds = out.argmax(dim=1).cpu().numpy()
+            probs = torch.softmax(out, dim=1)[:, 1].cpu().numpy()
+            labels = batch.y.cpu().numpy()
+
+            y_true.extend(labels)
+            y_pred.extend(preds)
+            y_prob.extend(probs)
+
+    # --- Compute metrics ---
+    test_loss = total_test_loss / len(test_loader)
+    test_acc = accuracy_score(y_true, y_pred)
+    test_auc = roc_auc_score(y_true, y_prob)
+    test_f1 = f1_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel().tolist()
+    SN = tp / (tp + fn)
+    SP = tn / (tn + fp)
+
+    # --- Display summary ---
+    print("\n=== Final Test Results ===")
+    # print(f"Test Loss: {test_loss:.4f}")
+    print("Confusion Matrix:\n", cm)
+    print(f"\nTrue Negative: {tn}")
+    print(f"False Positive: {fp}")
+    print(f"False Negative: {fn}")
+    print(f"True Positive: {tp}")
+    print(f"\nSensitivity: {SN}")
+    print(f"Specificity: {SP}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"Accuracy:  {test_acc:.4f}")
+    print(f"AUC:       {test_auc:.4f}")
+    # print(f"F1 Score:  {test_f1:.4f}")
+
+    # Prepare results
+    results = {
+        'test_loss': test_loss,
+        'test_accuracy': test_acc,
+        'test_auc': test_auc,
+        'test_f1': test_f1,
+        'test_precision': precision,
+        'test_recall': recall,
+        'TN': tn,
+        'FP': fp,
+        'FN': fn,
+        'TP': tp
+    }
+    
+    if return_predictions:
+        results['true_labels'] = y_true
+        results['predictions'] = y_pred
+        results['probabilities'] = y_prob
+
+    return results
