@@ -69,12 +69,11 @@ def train(
     train_aucs, val_aucs = [], []
     train_accuracies, val_accuracies = [], []
 
-    best_val_loss = float('inf')
     best_val_auc = 0.0
     early_stopping_counter = 0
     best_epoch = 0
 
-    print(f"\n########## Training for {epoch_n} epochs on {device.upper()}...")
+    print(f"\n########## Training for {epoch_n} epochs on {device}...")
 
     for epoch in range(1, epoch_n + 1):
         t0 = time.time()
@@ -142,8 +141,10 @@ def train(
         val_accuracies.append(val_acc)
         val_aucs.append(val_auc)
 
+        # Scheduler Logic based on Validation AUC
+        pseudo_loss = 1.0 - val_auc if not np.isnan(val_auc) else 1.0
         if use_scheduler and scheduler is not None:
-            scheduler.step(val_loss)
+            scheduler.step(pseudo_loss)
 
         dt = time.time() - t0
         print(f"- Epoch [{epoch:03d}/{epoch_n}] "
@@ -151,26 +152,24 @@ def train(
               f"| Val Loss: {val_loss:.4f} | Val AUC: {val_auc:.3f} | Val Acc: {val_acc:.3f} "
               f"| EarlyStop: {early_stopping_counter}/{early_stopping_patience} | Time: {dt:.1f}s")
         
-        # Save the best model based on validation loss
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), model_path)
-
-        # === Early Stopping Logic based on Validation AUC ===
-        current_auc = val_auc if not np.isnan(val_auc) else 0.0
-        
-        if current_auc > best_val_auc + early_stopping_min_delta:
-            best_val_auc = current_auc
-            early_stopping_counter = 0
+        # Save the best model using Early Stopping Logic based on Validation AUC 
+        improvement = val_auc - best_val_auc
+        if improvement > early_stopping_min_delta:
+            best_val_auc = val_auc
             best_epoch = epoch
+            early_stopping_counter = 0
+            
+            # Save model
+            torch.save(model.state_dict(), model_path)
             print(f"+ New best AUC: {best_val_auc:.4f} (epoch {epoch})")
+
         else:
             early_stopping_counter += 1
 
-        # Check early stopping condition
-        if early_stopping_counter >= early_stopping_patience:
-            print(f"XXXXXXXXXX Early stopping triggered at epoch {epoch}!") 
-            break
+            # Check early stopping condition
+            if early_stopping_counter >= early_stopping_patience:
+                print(f"XXXXXXXXXX Early stopping triggered at epoch {epoch}!")
+                break
        
     if early_stopping_counter < early_stopping_patience:
         print(f"\n########## Training completed for {epoch_n} epochs.")
@@ -220,7 +219,7 @@ def train(
 
 
 def test(
-        test_graphs,
+        graphs,
         model,
         model_path,
         batch_size=64,
@@ -234,14 +233,14 @@ def test(
     model.eval()
 
     # --- Data Loader ---
-    test_loader = DataLoader(test_graphs, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(graphs, batch_size=batch_size, shuffle=False)
     criterion = torch.nn.CrossEntropyLoss()
 
     # --- Logging containers ---
     total_test_loss = 0
     y_true, y_pred, y_prob = [], [], []
 
-    print(f"########## Testing on {len(test_graphs)} samples...")
+    print(f"########## Testing on {len(graphs)} samples...")
 
     # --- Evaluation loop ---
     with torch.no_grad():
@@ -273,7 +272,6 @@ def test(
 
     # --- Display summary ---
     print("\n=== Final Test Results ===")
-    # print(f"Test Loss: {test_loss:.4f}")
     print("Confusion Matrix:\n", cm)
     print(f"\nTrue Negative: {tn}")
     print(f"False Positive: {fp}")
@@ -285,22 +283,9 @@ def test(
     print(f"Recall:    {recall:.4f}")
     print(f"Accuracy:  {test_acc:.4f}")
     print(f"AUC:       {test_auc:.4f}")
-    # print(f"F1 Score:  {test_f1:.4f}")
 
     # Prepare results
-    results = {
-        'test_loss': test_loss,
-        'test_accuracy': test_acc,
-        'test_auc': test_auc,
-        'test_f1': test_f1,
-        'test_precision': precision,
-        'test_recall': recall,
-        'TN': tn,
-        'FP': fp,
-        'FN': fn,
-        'TP': tp
-    }
-    
+    results = {}
     if return_predictions:
         results['true_labels'] = y_true
         results['predictions'] = y_pred
