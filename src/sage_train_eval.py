@@ -292,3 +292,152 @@ def test(
         results['probabilities'] = y_prob
 
     return results
+
+
+import pandas as pd
+
+def test2(
+        graphs,
+        model,
+        model_path,
+        batch_size=64,
+        device="cuda" if torch.cuda.is_available() else "cpu",
+        return_predictions=False,
+        return_dataframe=True
+):
+    """
+    Clean evaluation function for GNN graph datasets.
+    Loads model weights, evaluates performance, and optionally returns
+    prediction dataframe and raw probabilities.
+    """
+
+    # --------------------------
+    # Load model
+    # --------------------------
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model = model.to(device)
+    model.eval()
+
+    # --------------------------
+    # Data Loader
+    # --------------------------
+    test_loader = DataLoader(graphs, batch_size=batch_size, shuffle=False)
+    criterion = torch.nn.CrossEntropyLoss()
+
+    # --------------------------
+    # Logging containers
+    # --------------------------
+    y_true, y_pred, y_prob = [], [], []
+    raw_logits = []
+
+    print(f"########## Testing on {len(graphs)} samples...")
+
+    # --------------------------
+    # Inference Loop
+    # --------------------------
+    total_loss = 0
+    with torch.no_grad():
+        for batch in test_loader:
+            batch = batch.to(device)
+
+            out = model(batch)
+            loss = criterion(out, batch.y)
+            total_loss += loss.item()
+
+            logits = out.cpu().numpy()
+            probs = torch.softmax(out, dim=1).cpu().numpy()
+
+            raw_logits.extend(logits)
+            y_true.extend(batch.y.cpu().numpy())
+            y_pred.extend(probs.argmax(axis=1))
+            y_prob.extend(probs[:, 1])    # probability of class 1
+
+    # --------------------------
+    # Metrics
+    # --------------------------
+    test_loss = total_loss / len(test_loader)
+    acc = accuracy_score(y_true, y_pred)
+    auc = roc_auc_score(y_true, y_prob)
+    f1 = f1_score(y_true, y_pred)
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    SN = tp / (tp + fn)
+    SP = tn / (tn + fp)
+
+    # --------------------------
+    # Print results
+    # --------------------------
+    print("\n=== Final Test Results ===")
+    print("Confusion Matrix:")
+    print(confusion_matrix(y_true, y_pred))
+    print(f"\nAccuracy:   {acc:.4f}")
+    print(f"AUC:        {auc:.4f}")
+    print(f"F1 Score:   {f1:.4f}")
+    print(f"Precision:  {precision:.4f}")
+    print(f"Recall:     {recall:.4f}")
+    print(f"Sensitivity: {SN:.4f}")
+    print(f"Specificity: {SP:.4f}")
+
+    # --------------------------
+    # Prepare return dictionary
+    # --------------------------
+    results = {
+        "metrics": {
+            "loss": test_loss,
+            "accuracy": acc,
+            "auc": auc,
+            "f1": f1,
+            "precision": precision,
+            "recall": recall,
+            "sensitivity": SN,
+            "specificity": SP,
+            "confusion_matrix": np.array([[tn, fp], [fn, tp]])
+        }
+    }
+
+    # --------------------------
+    # Build DataFrame
+    # --------------------------
+    if return_dataframe:
+        df = pd.DataFrame({
+            "sample_index": np.arange(len(y_true)),
+            "true_label": y_true,
+            "predicted_label": y_pred,
+            "prob_class_1": y_prob,
+            "prob_class_0": 1 - np.array(y_prob),
+        })
+
+        df["confidence"] = df[["prob_class_1", "prob_class_0"]].max(axis=1)
+        df["is_correct"] = df["true_label"] == df["predicted_label"]
+
+        df["error_type"] = df.apply(
+            lambda r: (
+                "TP" if (r.true_label == 1 and r.predicted_label == 1) else
+                "TN" if (r.true_label == 0 and r.predicted_label == 0) else
+                "FP" if (r.true_label == 0 and r.predicted_label == 1) else
+                "FN"
+            ),
+            axis=1
+        )
+
+        # Add logits
+        raw_logits_arr = np.array(raw_logits)
+        df["logit_class_0"] = raw_logits_arr[:, 0]
+        df["logit_class_1"] = raw_logits_arr[:, 1]
+
+        results["dataframe"] = df
+        results["sorted_dataframe"] = df.sort_values("confidence", ascending=False).reset_index(drop=True)
+
+    # --------------------------
+    # Return predictions optional
+    # --------------------------
+    if return_predictions:
+        results["predictions"] = {
+            "true": np.array(y_true),
+            "pred": np.array(y_pred),
+            "prob": np.array(y_prob)
+        }
+
+    return results
