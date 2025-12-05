@@ -302,7 +302,6 @@ def test2(
         model_path,
         batch_size=64,
         device="cuda" if torch.cuda.is_available() else "cpu",
-        return_predictions=False,
         return_dataframe=True
 ):
     """
@@ -328,7 +327,7 @@ def test2(
     # Logging containers
     # --------------------------
     y_true, y_pred, y_prob = [], [], []
-    raw_logits = []
+
 
     print(f"########## Testing on {len(graphs)} samples...")
 
@@ -344,10 +343,8 @@ def test2(
             loss = criterion(out, batch.y)
             total_loss += loss.item()
 
-            logits = out.cpu().numpy()
             probs = torch.softmax(out, dim=1).cpu().numpy()
 
-            raw_logits.extend(logits)
             y_true.extend(batch.y.cpu().numpy())
             y_pred.extend(probs.argmax(axis=1))
             y_prob.extend(probs[:, 1])    # probability of class 1
@@ -356,13 +353,12 @@ def test2(
     # Metrics
     # --------------------------
     test_loss = total_loss / len(test_loader)
-    acc = accuracy_score(y_true, y_pred)
-    auc = roc_auc_score(y_true, y_prob)
-    f1 = f1_score(y_true, y_pred)
+    test_acc = accuracy_score(y_true, y_pred)
+    test_auc = roc_auc_score(y_true, y_prob)
     precision = precision_score(y_true, y_pred)
     recall = recall_score(y_true, y_pred)
-
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel()
+    cm = confusion_matrix(y_true, y_pred)
+    tn, fp, fn, tp = confusion_matrix(y_true, y_pred).ravel().tolist()
     SN = tp / (tp + fn)
     SP = tn / (tn + fp)
 
@@ -370,25 +366,26 @@ def test2(
     # Print results
     # --------------------------
     print("\n=== Final Test Results ===")
-    print("Confusion Matrix:")
-    print(confusion_matrix(y_true, y_pred))
-    print(f"\nAccuracy:   {acc:.4f}")
-    print(f"AUC:        {auc:.4f}")
-    print(f"F1 Score:   {f1:.4f}")
-    print(f"Precision:  {precision:.4f}")
-    print(f"Recall:     {recall:.4f}")
-    print(f"Sensitivity: {SN:.4f}")
-    print(f"Specificity: {SP:.4f}")
+    print("Confusion Matrix:\n", cm)
+    print(f"\nTrue Negative: {tn}")
+    print(f"False Positive: {fp}")
+    print(f"False Negative: {fn}")
+    print(f"True Positive: {tp}")
+    print(f"\nSensitivity: {SN}")
+    print(f"Specificity: {SP}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall:    {recall:.4f}")
+    print(f"Accuracy:  {test_acc:.4f}")
+    print(f"AUC:       {test_auc:.4f}")
 
     # --------------------------
-    # Prepare return dictionary
+    # Save results
     # --------------------------
     results = {
         "metrics": {
-            "loss": test_loss,
-            "accuracy": acc,
-            "auc": auc,
-            "f1": f1,
+            "test_loss": test_loss,
+            "test_accuracy": test_acc,
+            "test_auc": test_auc,
             "precision": precision,
             "recall": recall,
             "sensitivity": SN,
@@ -398,7 +395,7 @@ def test2(
     }
 
     # --------------------------
-    # Build DataFrame
+    # DataFrame output
     # --------------------------
     if return_dataframe:
         df = pd.DataFrame({
@@ -422,22 +419,7 @@ def test2(
             axis=1
         )
 
-        # Add logits
-        raw_logits_arr = np.array(raw_logits)
-        df["logit_class_0"] = raw_logits_arr[:, 0]
-        df["logit_class_1"] = raw_logits_arr[:, 1]
-
         results["dataframe"] = df
         results["sorted_dataframe"] = df.sort_values("confidence", ascending=False).reset_index(drop=True)
-
-    # --------------------------
-    # Return predictions optional
-    # --------------------------
-    if return_predictions:
-        results["predictions"] = {
-            "true": np.array(y_true),
-            "pred": np.array(y_pred),
-            "prob": np.array(y_prob)
-        }
 
     return results
