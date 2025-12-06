@@ -1,6 +1,7 @@
 import torch
 import random
 import numpy as np
+import pandas as pd
 import time
 from torch.utils.data import WeightedRandomSampler
 from torch_geometric.loader import DataLoader
@@ -293,9 +294,6 @@ def test(
 
     return results
 
-
-import pandas as pd
-
 def test2(
         graphs,
         model,
@@ -304,11 +302,6 @@ def test2(
         device="cuda" if torch.cuda.is_available() else "cpu",
         return_dataframe=True
 ):
-    """
-    Clean evaluation function for GNN graph datasets.
-    Loads model weights, evaluates performance, and optionally returns
-    prediction dataframe and raw probabilities.
-    """
 
     # --------------------------
     # Load model
@@ -363,39 +356,31 @@ def test2(
     SP = tn / (tn + fp)
 
     # --------------------------
-    # Print results
+    # Save Metrics
     # --------------------------
-    print("\n=== Final Test Results ===")
-    print("Confusion Matrix:\n", cm)
-    print(f"\nTrue Negative: {tn}")
-    print(f"False Positive: {fp}")
-    print(f"False Negative: {fn}")
-    print(f"True Positive: {tp}")
-    print(f"\nSensitivity: {SN}")
-    print(f"Specificity: {SP}")
-    print(f"Precision: {precision:.4f}")
-    print(f"Recall:    {recall:.4f}")
-    print(f"Accuracy:  {test_acc:.4f}")
-    print(f"AUC:       {test_auc:.4f}")
-
-    # --------------------------
-    # Save results
-    # --------------------------
+    metrics_dict = {
+        "#Sample": len(graphs),
+        "TN": int(tn),
+        "FP": int(fp),
+        "FN": int(fn),
+        "TP": int(tp),
+        "Sensitivity": round(SN, 4),
+        "Specificity": round(SP, 4),
+        "Precision": round(precision, 4),
+        "Recall": round(recall, 4),
+        "Accuracy": round(test_acc, 4),
+        "AUC": round(test_auc, 4),
+    }
+    
+    # Create a single-row DataFrame (one metric per column)
+    metrics_df = pd.DataFrame([metrics_dict])
+    
     results = {
-        "metrics": {
-            "test_loss": test_loss,
-            "test_accuracy": test_acc,
-            "test_auc": test_auc,
-            "precision": precision,
-            "recall": recall,
-            "sensitivity": SN,
-            "specificity": SP,
-            "confusion_matrix": np.array([[tn, fp], [fn, tp]])
-        }
+        "metrics": metrics_df
     }
 
     # --------------------------
-    # DataFrame output
+    # MC-uncertainty output
     # --------------------------
     if return_dataframe:
         df = pd.DataFrame({
@@ -409,17 +394,8 @@ def test2(
         df["confidence"] = df[["prob_class_1", "prob_class_0"]].max(axis=1)
         df["is_correct"] = df["true_label"] == df["predicted_label"]
 
-        df["error_type"] = df.apply(
-            lambda r: (
-                "TP" if (r.true_label == 1 and r.predicted_label == 1) else
-                "TN" if (r.true_label == 0 and r.predicted_label == 0) else
-                "FP" if (r.true_label == 0 and r.predicted_label == 1) else
-                "FN"
-            ),
-            axis=1
-        )
+        results["mc"] = df
+        results["sorted_mc"] = df.sort_values("confidence", ascending=False).reset_index(drop=True)
 
-        results["dataframe"] = df
-        results["sorted_dataframe"] = df.sort_values("confidence", ascending=False).reset_index(drop=True)
-
+    print(f"########## Testing completed. Outputs are saved in results!")
     return results
