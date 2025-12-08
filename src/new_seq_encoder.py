@@ -84,16 +84,26 @@ def seq_to_graph(seq, k, vocab, bidirectional=False, normalize=True):
 
 
 def build_dataset(fasta_path, labels_path, k, vocab=None):
+    print("########## Start building garphs from seqs...")
+
     records = read_fasta(fasta_path)
     labels = read_labels(labels_path)
+
     seqs = [r[1] for r in records]
+    gene_ids = [r[0] for r in records]
+
     if vocab is None:
         vocab = build_vocab(seqs, k)
+
     graphs = []
-    for seq, lab in zip(seqs, labels):
+    for seq, lab, gid in zip(seqs, labels, gene_ids):
         g = seq_to_graph(seq, k, vocab)
         if g is None:
             continue
+
         g.y = torch.tensor([lab], dtype=torch.long)
+        g.gene_id = gid
         graphs.append(g)
+
+    print("########## Graph Built!")
     return graphs, vocab

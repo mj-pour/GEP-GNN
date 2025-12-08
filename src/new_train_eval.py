@@ -54,7 +54,7 @@ def train(
 
     val_loader = DataLoader(valset, batch_size=batch_size, shuffle=False)
 
-    print(f"Train size: {len(trainset)}, Validation size: {len(valset)}")
+    print(f"\n{len(graphs)} graphs have been split: Train size: {len(trainset)}, Validation size: {len(valset)}")
 
     # === Optimizer and Scheduler ===
     optimizer = Adam(model.parameters(), lr=learning_rate, weight_decay=1e-4)
@@ -238,7 +238,7 @@ def test(
 
     # === Logging containers ===
     y_true, y_pred, y_prob = [], [], []
-
+    gene_ids_all = []  #collect gene IDs
 
     print(f"########## Testing on {len(graphs)} samples...")
 
@@ -257,6 +257,9 @@ def test(
             y_true.extend(batch.y.cpu().numpy())
             y_pred.extend(probs.argmax(axis=1))
             y_prob.extend(probs[:, 1])    # probability of class 1
+
+            # ----- Gene IDs -----
+            gene_ids_all.extend(batch.gene_id)
 
     # === Metrics ===
     test_loss = total_loss / len(test_loader)
@@ -293,7 +296,7 @@ def test(
     # === Probability distribution ===
     if return_dataframe:
         df = pd.DataFrame({
-            "sample_index": np.arange(len(y_true)),
+            "gene_id": gene_ids_all,
             "true_label": y_true,
             "predicted_label": y_pred,
             "prob_class_1": y_prob,
