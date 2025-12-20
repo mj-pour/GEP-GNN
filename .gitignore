@@ -14,3 +14,14 @@ __pycache__/
 # Ignore spesified files
 data/musculus_genes.fasta
 data/musculus_labels.txt
+src/CustomGINModel.ipynb
+src/CustomGINModel.py
+src/EdgeAttrGATModel.ipynb
+src/EdgeAttrGATModel.py
+src/GINCNNModel.ipynb
+src/GINCNNModel.py
+src/WeightedGCNModel.ipynb
+src/WeightedGCNModel.py
+src/sage_model.py
+src/sage_notebook.ipynb
+src/sage_train_eval.py
