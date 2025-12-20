@@ -10,3 +10,7 @@ src/.ipynb_checkpoints/
 # Other common ignores
 __pycache__/
 .DS_Store
+
+# Ignore spesified files
+data/musculus_genes.fasta
+data/musculus_labels.txt
