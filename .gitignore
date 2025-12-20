@@ -25,3 +25,7 @@ src/WeightedGCNModel.py
 src/sage_model.py
 src/sage_notebook.ipynb
 src/sage_train_eval.py
+src/GNNmodel.py
+src/SeqEncoder.py
+src/main.ipynb
+src/train_eval.py
