@@ -205,9 +205,22 @@ def train(
 
     # --- AUC Curves ---
     plt.subplot(1, 2, 2)
-    plt.plot(train_aucs, label="Train AUC", linewidth=2)
-    plt.plot(val_aucs, label="Validation AUC", linewidth=2)
-    plt.axvline(x=best_epoch-1, color='r', linestyle='--', alpha=0.7, label=f'Best Epoch {best_epoch}')
+    epochs = range(1, len(train_aucs) + 1)
+    plt.plot(epochs, train_aucs, label="Train AUC", linewidth=2)
+    plt.plot(epochs, val_aucs, label="Validation AUC", linewidth=2)
+
+    plt.axvline(x=best_epoch, color='r', linestyle='--', alpha=0.7, 
+                label=f'Best Epoch {best_epoch}')
+
+    plt.axhline(y=best_val_auc, color='r', linestyle='--', alpha=0.5)
+
+    plt.plot([0, best_epoch], [best_val_auc, best_val_auc], color='r', linestyle=':', alpha=0.5)
+
+    plt.text(0.5, best_val_auc + 0.01, f'Best AUC: {best_val_auc:.4f}', 
+            color='red', fontweight='bold', alpha=0.8,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.7))
+    
+
     plt.xlabel("Epoch")
     plt.ylabel("AUC")
     plt.legend()
