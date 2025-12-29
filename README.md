@@ -77,7 +77,7 @@ results = test(graphs=test_graphs, model=test_model)
     - Global Pooling - mean, max, and sum over node features
     - DiffPool – hierarchical pooling for graph-level embedding
 
-- train_eval.py
+- pipeline.py
   - Unified training and testing functions
   - Handles learning rate scheduling, checkpointing, and GPU detection
   - Logs loss and metric curves per epoch
