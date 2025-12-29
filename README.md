@@ -38,7 +38,7 @@ graphs, vocab = build_dataset(genes_path, labels_path, k=3)
 
 ```python
 from gnn_models import CustomGAT 
-from train_eval import train
+from pipeline import train
 
 model = CustomGAT(**config).to(device)
 results = train(graphs, model)
@@ -48,7 +48,7 @@ results = train(graphs, model)
 
 ```python
 from gnn_models import CustomGAT
-from train_eval import test
+from pipeline import test
 
 test_graphs, _ = build_dataset(test_genes_path, test_labels_path, k=3)
 
